@@ -2,12 +2,14 @@
 using ChineseSale.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace ChineseSale.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("sliding")]
     public class OrderController : ControllerBase
     {
         private readonly IOrderService _orderService;

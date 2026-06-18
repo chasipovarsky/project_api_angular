@@ -3,6 +3,7 @@ using ChineseSale.Models;
 using ChineseSale.Repositories;
 using Org.BouncyCastle.Bcpg;
 using System.Text;
+using System.Text.Json;
 
 namespace ChineseSale.Services
 {
@@ -14,7 +15,8 @@ namespace ChineseSale.Services
         private readonly IPackageService _packageService;
         private readonly IEmailService _emailService;
         private readonly IUserRepository _userRepository;
-        public OrderService(IOrderRepository orderRepository , IGiftService giftService, IUserService userService, IEmailService emailService, IUserRepository userRepository, IPackageService packageService)
+        private readonly IKafkaProducerService _kafkaProducerService;
+        public OrderService(IOrderRepository orderRepository, IGiftService giftService, IUserService userService, IEmailService emailService, IUserRepository userRepository, IPackageService packageService, IKafkaProducerService kafkaProducerService)
         {
             _orderRepository = orderRepository;
             _giftService = giftService;
@@ -22,7 +24,7 @@ namespace ChineseSale.Services
             _emailService = emailService;
             _userRepository = userRepository;
             _packageService = packageService;
-
+            _kafkaProducerService = kafkaProducerService;
         }
         public async Task<IEnumerable<GetOrderDto>> GetAllOrderAsync()
         {
@@ -119,6 +121,19 @@ namespace ChineseSale.Services
             };
 
             await _orderRepository.CreateOrderAsync(order);
+
+            var orderCreatedPayload = new
+            {
+                OrderId = order.Id,
+                UserId = order.UserId,
+                OrderDate = order.OrderDate,
+                Sum = order.Sum,
+                GiftsId = order.GiftsId,
+                PackagesId = order.PackagesId
+            };
+
+            var orderCreatedJson = JsonSerializer.Serialize(orderCreatedPayload);
+            await _kafkaProducerService.SendMessageAsync("order-created", orderCreatedJson);
 
             //var emailMessage = new EmailDto()
             //{

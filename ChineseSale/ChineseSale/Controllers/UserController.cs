@@ -3,8 +3,9 @@ using ChineseSale.Models;
 using ChineseSale.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -13,6 +14,7 @@ namespace ChineseSale.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("sliding")]
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
@@ -31,9 +33,19 @@ namespace ChineseSale.Controllers
         {
             try
             {
-                var user = await _userService.CreateUserAsync(dto);
-                _logger.LogInformation($"New user registered with ID: {user.Id}");
-                return Ok(user);
+                var result = await _userService.CreateUserAsync(dto);
+
+                Response.Cookies.Append("jwt", result.Token, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.Strict,
+                    Expires = DateTime.UtcNow.AddHours(2)
+                });
+
+                _logger.LogInformation($"New user registered with ID: {result.User.Id}");
+
+                return Ok(result.User);
             }
             catch (Exception ex)
             {
@@ -43,14 +55,21 @@ namespace ChineseSale.Controllers
         }
 
         [HttpPost("login")]
-        public async Task<ActionResult<string>> Login(LoginDto dto)
+        public async Task<IActionResult> Login(LoginDto dto)
         {
             try
             {
-                var user = await _userService.LoginAsync(dto);
-                var token = GenerateJwtToken(user);
-                _logger.LogInformation($"User logged in with ID: {user.Id}");
-                return Ok(new { Token = token });
+                var token = await _userService.LoginAsync(dto);
+
+                Response.Cookies.Append("jwt", token, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.Strict,
+                    Expires = DateTime.UtcNow.AddHours(2)
+                });
+
+                return Ok();
             }
             catch (Exception ex)
             {
@@ -125,7 +144,7 @@ namespace ChineseSale.Controllers
 
         private string GenerateJwtToken(User user)
         {
-            var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
+            var key = Encoding.UTF8.GetBytes(_config["JwtSettings:SecretKey"]);
             var tokenHandler = new JwtSecurityTokenHandler();
             var tokenDescriptor = new SecurityTokenDescriptor
             {

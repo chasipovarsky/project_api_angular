@@ -1,13 +1,15 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using ChineseSale.Dtos;
 using ChineseSale.Services;
-using ChineseSale.Dtos;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.Tasks;
 
 namespace ChineseSale.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("sliding")]
     public class DonorController : ControllerBase
     {
         private readonly IDonorService _donorService;

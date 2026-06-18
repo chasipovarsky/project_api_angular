@@ -1,6 +1,9 @@
 ﻿using ChineseSale.Dtos;
 using ChineseSale.Models;
 using ChineseSale.Repositories;
+using Microsoft.Extensions.Configuration;
+using StackExchange.Redis;
+using System.Text.Json;
 
 namespace ChineseSale.Services
 {
@@ -11,16 +14,28 @@ namespace ChineseSale.Services
         private readonly IDonorRepository _donorRepository;
         private readonly IBasketRepository _basketRepository;
         private readonly IOrderRepository _orderRepository;
-        public GiftService(IGiftRepository giftRepository,ICategoryRepository categoryRepository,IOrderRepository orderRepository,IBasketRepository basketRepository,IDonorRepository donorRepository)
+        private readonly IDatabase _redis;
+        private readonly int _ttlSeconds;
+        private const string CacheKey = "all_gifts";
+        public GiftService(IGiftRepository giftRepository, ICategoryRepository categoryRepository, IOrderRepository orderRepository, IBasketRepository basketRepository,
+            IDonorRepository donorRepository, IConnectionMultiplexer redis, IConfiguration configuration)
         {
             _giftRepository = giftRepository;
             _categoryRepository = categoryRepository;
             _donorRepository = donorRepository;
             _basketRepository = basketRepository;
             _orderRepository = orderRepository;
+            _redis = redis.GetDatabase();
+            _ttlSeconds = configuration.GetValue<int>("Redis:TtlSeconds");
         }
         public async Task<IEnumerable<GetGiftDto>> GetAllGiftAsync()
         {
+            // נסה לקחת מה-cache
+            var cached = await _redis.StringGetAsync(CacheKey);
+            if (!cached.IsNullOrEmpty)
+                return JsonSerializer.Deserialize<List<GetGiftDto>>(cached!);
+
+            // אם אין cache — שלוף מה-DB
             IEnumerable<Gift> gifts = await _giftRepository.GetAllGiftAsync();
             List<GetGiftDto> giftDtos = new List<GetGiftDto>();
             foreach (var gift in gifts)
@@ -34,13 +49,14 @@ namespace ChineseSale.Services
                     Value = gift.Value,
                     Category = new GetCategoryDto() { Id = gift.Category.Id, Name = gift.Category.Name },
                     Donor = new GetDonorDto() { Id = gift.Donor.Id, Name = gift.Donor.Name, Email = gift.Donor.Email, Phone = gift.Donor.Phone },
-                    //TypeCard = gift.TypeCard,
                     SumCustomers = gift.SumCustomers
                 };
                 giftDtos.Add(giftDto);
             }
-            return giftDtos;
 
+            // שמור ב-cache
+            await _redis.StringSetAsync(CacheKey, JsonSerializer.Serialize(giftDtos), TimeSpan.FromSeconds(_ttlSeconds));
+            return giftDtos;
         }
         public async Task<GetGiftDto?> GetByIdGiftAsync(int Id)
         {
@@ -120,6 +136,7 @@ namespace ChineseSale.Services
             await _giftRepository.DeleteGiftAsync(gift);
             await _categoryRepository.DeleteGiftFromCategory(gift, gift.Category);
             await _donorRepository.DeleteGiftFromDonor(gift, gift.Donor);
+            await _redis.KeyDeleteAsync(CacheKey);
 
             return true;
         }

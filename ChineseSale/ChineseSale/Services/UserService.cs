@@ -3,15 +3,21 @@ using ChineseSale.Models;
 using ChineseSale.Repositories;
 using System.Text;
 using System.Security.Cryptography;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 
 namespace ChineseSale.Services
 {
     public class UserService : IUserService
     {
         private readonly IUserRepository _userRepository;
-        public UserService(IUserRepository userRepository)
+        private readonly IConfiguration _config;
+        public UserService(IUserRepository userRepository, IConfiguration config)
         {
             _userRepository = userRepository;
+            _config = config;
         }
         private string HashPassword(string password)
         {
@@ -81,7 +87,7 @@ namespace ChineseSale.Services
             else
                 throw new ArgumentException("user not found");
         }
-        public async Task<GetUserDto> CreateUserAsync(CreateUserDto userDto)
+        public async Task<RegisterResponseDto> CreateUserAsync(CreateUserDto userDto)
         {
             User duplicate = await _userRepository.GetUserByUserNameAsync(userDto.UserName);
             if (duplicate != null)
@@ -103,7 +109,7 @@ namespace ChineseSale.Services
             await _userRepository.CreateUserAsync(user);
             User user1 = await _userRepository.GetUserByIdAsync(user.Id);
 
-            return new GetUserDto()
+            var userResponse = new GetUserDto()
             {
                 Id = user1.Id,
                 Name = user1.Name,
@@ -112,7 +118,14 @@ namespace ChineseSale.Services
                 Phone = user1.Phone,
                 UserName = user1.UserName,
                 Role = user1.Role
+            };
 
+            var token = GenerateJwtToken(user1);
+
+            return new RegisterResponseDto
+            {
+                User = userResponse,
+                Token = token
             };
         }
         public async Task<GetUserDto?> UpdateUserAsync(UpdateUserDto userDto)
@@ -146,18 +159,39 @@ namespace ChineseSale.Services
             await _userRepository.DeleteUserAsync(user);
             return true;
         }
-        public async Task<User> LoginAsync(LoginDto dto)
+        public async Task<string> LoginAsync(LoginDto dto)
         {
             var user = await _userRepository.GetUserByUserNameAsync(dto.UserName);
-            if (user == null) 
+            if (user == null)
                 throw new UnauthorizedAccessException("Invalid credentials");
 
             if (user.Password != HashPassword(dto.Password))
                 throw new UnauthorizedAccessException("Invalid credentials");
 
-            return user;
+            return GenerateJwtToken(user);
         }
 
-
+        private string GenerateJwtToken(User user)
+        {
+            var key = Encoding.UTF8.GetBytes(_config["JwtSettings:SecretKey"]);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+                {
+            new Claim("id", user.Id.ToString()),
+            new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim("username", user.UserName),
+            new Claim(ClaimTypes.Name, user.Name.ToString()),
+            new Claim(ClaimTypes.StreetAddress, user.Address.ToString()),
+            new Claim(ClaimTypes.HomePhone, user.Phone.ToString()),
+            new Claim(ClaimTypes.Email, user.Email.ToString()),
+        }),
+                Expires = DateTime.UtcNow.AddHours(2),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
     }
 }

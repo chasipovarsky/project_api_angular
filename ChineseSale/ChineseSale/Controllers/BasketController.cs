@@ -1,13 +1,15 @@
-﻿using ChineseSale.Services;
+﻿using ChineseSale.Dtos;
+using ChineseSale.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ChineseSale.Dtos;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 
 namespace ChineseSale.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("sliding")]
     public class BasketController : ControllerBase
     {
         private readonly IBasketService _basketService;

@@ -2,12 +2,14 @@
 using ChineseSale.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 
 namespace ChineseSale.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("sliding")]
     public class CategoryController : ControllerBase
     {
         private readonly ICategoryService _categoryService;

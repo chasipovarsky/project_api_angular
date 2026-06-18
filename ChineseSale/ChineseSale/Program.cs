@@ -1,14 +1,17 @@
 using ChineseSale.Data;
 using ChineseSale.Repositories;
 using ChineseSale.Services;
-using Microsoft.EntityFrameworkCore;
-using System.ComponentModel;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using Serilog;
-using Microsoft.OpenApi.Models;
-using System.Text;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Serilog;
+using StackExchange.Redis;
+using System.ComponentModel;
+using System.Text;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,10 +19,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngularApp",
         policy => policy
-            .WithOrigins("http://localhost:4200") 
-            //.WithOrigins("http://localhost:51189")
+            .WithOrigins("http://localhost:4200")
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod()
+            .AllowCredentials());
 });
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -61,6 +64,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IBasketService, BasketService>();
 builder.Services.AddScoped<IPrizeService, PrizeService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
 
 builder.Services.AddEndpointsApiExplorer();
@@ -92,8 +96,8 @@ c.AddSecurityRequirement(new OpenApiSecurityRequirement
     });
 });
 
-var jwtKey = builder.Configuration["Jwt:Key"]
-             ?? throw new InvalidOperationException("JWT key not found in appsettings.json");
+var jwtKey = builder.Configuration["JwtSettings:SecretKey"]
+             ?? throw new InvalidOperationException("JWT key not found");
 
 var key = Encoding.UTF8.GetBytes(jwtKey);
 builder.Services.AddAuthentication(options =>
@@ -110,10 +114,36 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = false,
         ClockSkew = TimeSpan.Zero
     };
+
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            context.Token = context.Request.Cookies["jwt"];
+            return Task.CompletedTask;
+        }
+    };
 });
 
-builder.Services.AddAuthentication();
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect(
+        builder.Configuration["Redis:ConnectionString"]!
+    )
+);
+// --- Rate Limiting ---
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddSlidingWindowLimiter("sliding", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = builder.Configuration.GetValue<int>("RateLimiting:RequestLimit");
+        limiterOptions.Window = TimeSpan.FromMinutes(builder.Configuration.GetValue<int>("RateLimiting:TimeWindowMinutes"));
+        limiterOptions.SegmentsPerWindow = 6;
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
 
+    options.RejectionStatusCode = 429; // Too Many Requests
+});
 
 var app = builder.Build();
 app.UseStaticFiles();
@@ -139,6 +169,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseRateLimiter();
 
 app.UseCors("AllowAngularApp");
 

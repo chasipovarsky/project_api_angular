@@ -3,6 +3,11 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ChineseSale.Dtos
 {
+    public class RegisterResponseDto
+    {
+        public GetUserDto User { get; set; }
+        public string Token { get; set; }
+    }
     public class GetUserDto
     {
         public int Id { get; set; }
